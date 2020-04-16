@@ -1,0 +1,171 @@
+---
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+## COVID 19 Tweets Analysis
+There are Millions of tweets about Covid19 so far which makes sense, it’s a game changer event for humanity today. People are losing lives or their loved ones to this pandemic, worried, anxious and constantly imagining how their lives could possibly be more impacted by it. People tweeting official or unofficial statement disclose a lot of emotions associated with the event. The objective of this analysis is to identify those sentiments, and unlock this data to determine in future how can these consequences be withered off. The world is changing, and Corona will always have a huge role in how the world of tomorrow will operate. Whether its students choosing to study through online programs, employees opting to work from home, people facing anxiety issues, or companies facing issues in not meeting the cleaning equipment demand. It all begins from the pivotal point i.e. problems being faced by people today. I try to identify these problems and perform exploratory analysis using the tweets.
+
+I use my own developers account on twitter to scrape 1000 tweets from Twitter with #Covid19. Those were converted into a dataframe. 
+
+```{r}
+tweets_df <- read.csv('covid.csv')
+str(tweets_df)
+```
+
+### Cleaning the text 
+The 1000 tweets need some cleaning before we go on to analyse the text. We will be getting rid of numbers, unnecessary words, extra spaces, links and punctuations. The data is unstructured and needs to be given a order before it starts making sense. Sometimes, the cleaning can cause issues like removing words that can be important for insights. That was part of my crucial screening process before getting rid of english letters like *to* and *as*. For this we load the NLP package, called **tm**
+
+```{r}
+library(tm)
+library(tidytext)
+library(tidyr)
+library(dplyr)
+corpus <- iconv(tweets_df$text, to = "UTF-8")
+corpus <- Corpus(VectorSource(corpus))
+inspect(corpus[1:3])
+```
+
+As we can see, the text includes tagged people starting with *@*, multiple hashtags, links, punctuations and helping verbs, in my next code, i will get rid of those. 
+
+```{r}
+corpus <- tm_map(corpus, tolower)
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, removeWords, stopwords('english'))
+corpus <- tm_map(corpus, removeWords, c('covid', 'rt'))
+Textprocessing <- function(x)
+  {gsub("http[[:alnum:]]*",'', x)
+  gsub('http\\S+\\s*', '', x) ## Remove URLs
+  gsub('\\b+RT', '', x) ## Remove RT
+  gsub('#\\S+', '', x) ## Remove Hashtags
+  gsub('@\\S+', '', x) ## Remove Mentions
+  gsub('[[:cntrl:]]', '', x) ## Remove Controls and special characters
+  gsub("\\d", '', x) ## Remove Controls and special characters
+  gsub('[[:punct:]]', '', x) ## Remove Punctuations
+  gsub("^[[:space:]]*","",x) ## Remove leading whitespaces
+  gsub("[[:space:]]*$","",x) ## Remove trailing whitespaces
+  gsub(' +',' ',x) ## Remove extra whitespaces
+  gsub('…', '', x)
+}
+corpus <- tm_map(corpus, Textprocessing)
+inspect(corpus[1:3])
+inspect(corpus[1:3])
+```
+
+I can still observe a few irrelevant words like rt, but i will be removing these words by only keeping highly frequent words in for our analysis.
+
+### Plot
+Let's dive into plotting the barplot of words and frequently they were used
+
+```{r}
+tdm <- TermDocumentMatrix(corpus)
+tdm <- as.matrix(tdm)
+word_freq <- rowSums(tdm)
+word_freq <- subset(word_freq, word_freq>20) 
+library(RColorBrewer)
+coul <- brewer.pal(5, "Set2")
+barplot(word_freq,
+        las = 2,
+        col = coul)
+```
+
+###A Word Cloud
+```{r}
+library(wordcloud)
+word_cloud <- sort(rowSums(tdm), decreasing = TRUE)
+set.seed(222)
+wordcloud(words = names(word_cloud),
+          freq = word_cloud,
+          max.words = 100,
+          random.order = F,
+          min.freq = 5,
+          colors = brewer.pal(8, 'Dark2'),
+          scale = c(5, 0.3),
+          rot.per = 0.7)
+
+```
+
+There are words like violates or crisis, but positive annotations like solidarity, fighting, tackle etc. as well. We can also see words like: working, stayhome, work probably indicating the problems associated with this event. This shows a mixture of emotions within the texts. Lets do the sentiment analysis on these tweets:
+
+```{r}
+library(syuzhet)
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(reshape2)
+library(dplyr)
+tweets_sent <- iconv(tweets_df$text, to = "UTF-8")
+sentiment <- get_nrc_sentiment(tweets_sent)
+barplot(colSums(sentiment),
+        las = 2,
+        col = coul,
+        ylab = 'Count',
+        main = 'Sentiment Scores for Covid19 Tweets')
+```
+
+
+Sentiments are mostly positive. That means people are positively coping with the event, however, our concern is on identifying the problems that people are facing due to Covid19. Let's explore the words that people used in high frequency associated with positive and negative sentiments related to **WORKING FROM HOME**
+
+```{r}
+library(rtweet)
+library(twitteR)
+setup_twitter_oauth(api_key, api_secret, access_token, access_token_secret)
+tweets_wfh <- search_tweets("#Workfromhome", n = 1000, include_rts = FALSE)
+wfh_text <- tweets_wfh %>% select(screen_name, text) 
+head(wfh_text$text)
+```
+
+These are the tweets people posted with #Workfromhome. Let's clean this data up to visualise it further.
+
+```{r}
+wfh_text$stripped_text1 <- gsub("http\\S+","",wfh_text$text) #remove http elements
+wfh_text_stem <- wfh_text %>% #converting to lowercase, remove punctuation and add id
+  select(stripped_text1) %>%
+  unnest_tokens(word, stripped_text1)
+#Remove Stopwords
+clean_wfh <- wfh_text_stem %>%
+  anti_join(stop_words)
+##Viewing the clean data
+head(clean_wfh)
+```
+
+Now I find some common words in these tweets to give an overall picture of what the population is mostly talking about.
+
+```{r}
+library(ggplot2)
+clean_wfh %>%
+  count(word, sort = TRUE) %>%
+  top_n(20) %>%
+  mutate(word = reorder(word,n)) %>%
+  ggplot(aes(x = word, y = n)) +
+  geom_col() +
+  xlab(NULL) + coord_flip() + theme_light() +
+  labs(title = "Top twenty words found in #WorkfromHome tweets")
+```
+
+I will now extract sentiments of these tweets. 
+```{r}
+bing_wfh <- clean_wfh %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+head(bing_wfh)
+```
+Now lets explore the Positive and negative choice of words in the tweets for side-by-side comparison
+
+```{r}
+bing_wfh %>%
+  group_by(sentiment) %>%
+  top_n(20) %>%
+  ungroup() %>%
+  mutate(word = reorder(word,n)) %>%
+  ggplot(aes(word, n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(title = "Frequent positive and negative words in Workfromhome tweets") +
+  coord_flip() + theme_light()
+```
+Overall, we can see that upheavel, threat, difficult, doubts, hard are the negative connotations for negative tweets. It just depicts the anxiousness people have of how long the event will go for. The words like difficult and annoying could speak for difficulty they are facing in work from home interfaces under use. For positive words, we can see the choice of words like support, protect etc.
+
